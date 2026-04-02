@@ -67,6 +67,9 @@ class TestNormalize:
     def test_normalizes_rap_suffix_style(self):
         assert _normalize("茶花开了，该回家了 - 《茶花开了》说唱版") == "茶花开了,该回家了"
 
+    def test_strips_soundtrack_metadata_inside_brackets(self):
+        assert _normalize("天赋 (《锦绣未央》电视剧片尾曲)") == "天赋"
+
 
 class TestArtistAliases:
     def test_extracts_cjk_alias_from_parentheses(self):

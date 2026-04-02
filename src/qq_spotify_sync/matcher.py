@@ -37,6 +37,10 @@ _META_SUFFIX = re.compile(
 )
 _PROMO_SUFFIX = re.compile(r"\s*第\d+波$", re.IGNORECASE)
 _TRAILING_DESCRIPTOR = re.compile(r"\s+(说唱版|說唱版)$", re.IGNORECASE)
+_SOUNDTRACK_METADATA = re.compile(
+    r"\s*(网络剧|網絡劇|电视剧|電視劇|电影|電影)?\s*(主题曲|主題曲|片尾曲|插曲|等待曲)\s*",
+    re.IGNORECASE,
+)
 _PUNCT_TO_SPACE = str.maketrans({
     ".": " ",
     "·": " ",
@@ -93,6 +97,8 @@ def _normalize(text: str) -> str:
     # Remove feat. / ft. suffixes
     text = _FEAT_SUFFIX.sub("", text)
     text = _TRAILING_DESCRIPTOR.sub("", text)
+    text = _SOUNDTRACK_METADATA.sub(" ", text)
+    text = re.sub(r"[()（）]", " ", text)
     # Normalize punctuation variants that often differ across providers
     text = text.translate(_PUNCT_TO_SPACE)
     # Lowercase and collapse whitespace

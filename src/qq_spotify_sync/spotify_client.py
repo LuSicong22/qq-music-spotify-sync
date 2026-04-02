@@ -167,8 +167,7 @@ class SpotifyClient:
     def _create_managed_playlist(self, user_id: str, name: str) -> str:
         description = f"自动同步自 QQ 音乐热歌榜，每日更新。{PLAYLIST_MARKER}"
         try:
-            pl = self._sp.user_playlist_create(
-                user=user_id,
+            pl = self._sp.current_user_playlist_create(
                 name=name,
                 public=True,
                 description=description,

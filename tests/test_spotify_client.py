@@ -107,7 +107,7 @@ class TestEnsurePlaylist:
             ],
             "next": None,
         }
-        sp.user_playlist_create.return_value = {"id": "new-pl-id"}
+        sp.current_user_playlist_create.return_value = {"id": "new-pl-id"}
         client = _make_client(sp)
         result = client.ensure_playlist()
         assert result == "new-pl-id"
@@ -115,12 +115,12 @@ class TestEnsurePlaylist:
     def test_creates_playlist_when_none_found(self):
         sp = MagicMock()
         sp.current_user_playlists.return_value = {"items": [], "next": None}
-        sp.user_playlist_create.return_value = {"id": "brand-new-id"}
+        sp.current_user_playlist_create.return_value = {"id": "brand-new-id"}
         client = _make_client(sp)
         result = client.ensure_playlist()
         assert result == "brand-new-id"
-        sp.user_playlist_create.assert_called_once()
-        call_kwargs = sp.user_playlist_create.call_args
+        sp.current_user_playlist_create.assert_called_once()
+        call_kwargs = sp.current_user_playlist_create.call_args
         assert PLAYLIST_MARKER in call_kwargs.kwargs.get("description", "")
 
     def test_paginates_through_playlists(self):

@@ -17,16 +17,26 @@ logger = logging.getLogger(__name__)
 
 # Tags that indicate a special version we want to exclude unless the source also has them
 _SPECIAL_VERSION_TAGS = re.compile(
-    r"\b(live|remaster(?:ed)?|karaoke|instrumental|dj\s*version|remix|cover|acoustic|demo)\b",
+    r"\b(live|remaster(?:ed)?|karaoke|instrumental|dj\s*version|remix|cover|acoustic|demo|acapella)\b|伴奏|现场版|現場版|韩文版|韓文版|日文版|英文版|粤语版|粵語版",
     re.IGNORECASE,
 )
 
 # Patterns to strip from titles during normalization
-_BRACKET_CONTENT = re.compile(r"[(\[（【][^)\]）】]*[)\]）】]")
+_BRACKET_CONTENT = re.compile(r"[(\[（【《「『][^)\]）】》」』]*[)\]）】》」』]")
 _FEAT_SUFFIX = re.compile(r"\s+(feat\.?|ft\.?|featuring)\s+.*", re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s+")
 _LATIN_ARTIST_PHRASE = re.compile(r"[a-z0-9][a-z0-9 .&'/-]*[a-z0-9]", re.IGNORECASE)
 _CJK_ARTIST_PHRASE = re.compile(r"[\u4e00-\u9fff]{2,}")
+_VERSION_SUFFIX = re.compile(
+    r"\s*[-–—:：]\s*(live|remix|acoustic|demo|acapella|伴奏|说唱版|說唱版|现场版|現場版|live版伴奏|韩文版|韓文版|日文版|英文版|粤语版|粵語版)\b.*$",
+    re.IGNORECASE,
+)
+_META_SUFFIX = re.compile(
+    r'\s*[-–—:：]\s*(第\d+波|from the first take|電影.*主題曲|电影.*主题曲|影视剧.*片尾曲|影視劇.*片尾曲|影视剧.*插曲|影視劇.*插曲|ost)\b.*$',
+    re.IGNORECASE,
+)
+_PROMO_SUFFIX = re.compile(r"\s*第\d+波$", re.IGNORECASE)
+_TRAILING_DESCRIPTOR = re.compile(r"\s+(说唱版|說唱版)$", re.IGNORECASE)
 _PUNCT_TO_SPACE = str.maketrans({
     ".": " ",
     "·": " ",
@@ -75,10 +85,14 @@ def _normalize(text: str) -> str:
     # Convert full-width characters to ASCII equivalents
     text = unicodedata.normalize("NFKC", text)
     text = _T2S.convert(text)
+    text = _VERSION_SUFFIX.sub("", text)
+    text = _META_SUFFIX.sub("", text)
+    text = _PROMO_SUFFIX.sub("", text)
     # Remove content inside brackets
     text = _BRACKET_CONTENT.sub("", text)
     # Remove feat. / ft. suffixes
     text = _FEAT_SUFFIX.sub("", text)
+    text = _TRAILING_DESCRIPTOR.sub("", text)
     # Normalize punctuation variants that often differ across providers
     text = text.translate(_PUNCT_TO_SPACE)
     # Lowercase and collapse whitespace
@@ -172,8 +186,11 @@ def _score_candidate(
     ):
         return None
 
-    # Acceptance: exclude special versions unless source also has the tag
-    if not source_has_special and _has_special_version_tag(candidate.name):
+    candidate_has_special = _has_special_version_tag(candidate.name)
+    # Acceptance: only match special/non-special versions consistently.
+    if not source_has_special and candidate_has_special:
+        return None
+    if source_has_special and not candidate_has_special:
         return None
 
     # Acceptance: duration check (only when we have QQ duration)

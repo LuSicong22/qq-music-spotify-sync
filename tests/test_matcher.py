@@ -52,6 +52,21 @@ class TestNormalize:
     def test_converts_traditional_to_simplified(self):
         assert _normalize("戀人") == "恋人"
 
+    def test_strips_book_title_metadata(self):
+        assert _normalize("一念《逐玉》") == "一念"
+
+    def test_strips_movie_theme_suffix(self):
+        assert _normalize('如果可以 - 電影"月老"主題曲') == "如果可以"
+
+    def test_strips_wave_suffix(self):
+        assert _normalize("愛情訊息 - 第6波") == "爱情讯息"
+
+    def test_normalizes_live_suffix_style(self):
+        assert _normalize("慢冷 - Live") == "慢冷"
+
+    def test_normalizes_rap_suffix_style(self):
+        assert _normalize("茶花开了，该回家了 - 《茶花开了》说唱版") == "茶花开了,该回家了"
+
 
 class TestArtistAliases:
     def test_extracts_cjk_alias_from_parentheses(self):
@@ -138,6 +153,23 @@ class TestScoreCandidate:
         track = make_track(name="漠河舞厅 (Live)")
         score = _score_candidate(song, track, source_has_special=True)
         assert score is not None
+
+    def test_rejects_studio_version_when_source_is_live(self):
+        song = make_song(title="漠河舞厅 (Live)")
+        track = make_track(name="漠河舞厅")
+        score = _score_candidate(song, track, source_has_special=True)
+        assert score is None
+
+    def test_rejects_foreign_language_version_when_source_is_plain(self):
+        song = make_song(title="如果可以", artists=["韦礼安"], duration_ms=274_000)
+        track = make_track(name="如果可以 (韓文版)", artists=["WeiBird"], duration_ms=274_323)
+        score = _score_candidate(
+            song,
+            track,
+            source_has_special=False,
+            allow_primary_artist_fallback=True,
+        )
+        assert score is None
 
     def test_rejects_duration_too_different(self):
         song = make_song(duration_ms=270_000)

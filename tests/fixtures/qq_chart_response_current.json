@@ -1,0 +1,37 @@
+{
+  "code": 0,
+  "detail": {
+    "code": 0,
+    "data": {
+      "data": {
+        "topId": 26,
+        "title": "热歌榜",
+        "titleDetail": "热歌榜 第92天",
+        "song": [
+          {
+            "songId": 651845895,
+            "albumMid": "000L8e1z3GaJNk",
+            "title": "FLY",
+            "singerName": "严浩翔",
+            "interval": 203
+          }
+        ]
+      },
+      "songInfoList": [
+        {
+          "id": 651845895,
+          "title": "FLY",
+          "singer": [
+            {
+              "name": "严浩翔"
+            }
+          ],
+          "album": {
+            "name": "FLY"
+          },
+          "interval": 203
+        }
+      ]
+    }
+  }
+}

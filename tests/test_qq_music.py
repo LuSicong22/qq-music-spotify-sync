@@ -57,6 +57,25 @@ class TestParseResponse:
         songs = _parse_response(data, top_id=26)
         assert songs[0].artists == ["Artist A", "Artist B"]
 
+    def test_parses_current_chart_shape(self):
+        data = load_fixture("qq_chart_response_current.json")
+        songs = _parse_response(data, top_id=26)
+
+        assert len(songs) == 1
+        assert songs[0].title == "FLY"
+        assert songs[0].artists == ["严浩翔"]
+        assert songs[0].duration_ms == 203_000
+
+    def test_falls_back_to_nested_song_list(self):
+        data = load_fixture("qq_chart_response_current.json")
+        data["detail"]["data"]["songInfoList"] = []
+        songs = _parse_response(data, top_id=26)
+
+        assert len(songs) == 1
+        assert songs[0].title == "FLY"
+        assert songs[0].artists == ["严浩翔"]
+        assert songs[0].duration_ms == 203_000
+
     def test_skips_songs_with_empty_title(self):
         data = load_fixture("qq_chart_response.json")
         data["detail"]["data"]["songInfoList"].insert(0, {

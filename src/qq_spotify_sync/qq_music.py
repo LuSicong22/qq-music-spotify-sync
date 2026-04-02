@@ -64,10 +64,15 @@ def _parse_response(data: dict, top_id: int) -> list[QQSong]:
     """Parse the API response. Raises QQMusicError on structure problems."""
     detail = data.get("detail", {})
     resp_data = detail.get("data", {})
+    nested_chart = resp_data.get("data", {}) if isinstance(resp_data.get("data"), dict) else {}
 
     # Validate chart identity (fail closed)
     top_info = resp_data.get("topInfo", {})
-    list_name: str = top_info.get("listName", "")
+    list_name: str = (
+        top_info.get("listName", "")
+        or nested_chart.get("title", "")
+        or nested_chart.get("titleDetail", "")
+    )
     if top_id == 26 and "热歌" not in list_name:
         raise QQMusicError(
             f"Chart validation failed: expected '热歌' in listName, got '{list_name}'. "
@@ -75,6 +80,9 @@ def _parse_response(data: dict, top_id: int) -> list[QQSong]:
         )
 
     song_info_list = resp_data.get("songInfoList", [])
+    fallback_song_list = nested_chart.get("song", [])
+    if not song_info_list and fallback_song_list:
+        song_info_list = fallback_song_list
     if not song_info_list:
         raise QQMusicError(
             f"No songs returned from chart (topId={top_id}, listName='{list_name}'). "
@@ -89,11 +97,21 @@ def _parse_response(data: dict, top_id: int) -> list[QQSong]:
 
         singers = item.get("singer", [])
         artists = [s["name"].strip() for s in singers if s.get("name")]
+        if not artists and item.get("singerName"):
+            artists = [
+                name.strip()
+                for name in str(item["singerName"]).replace("/", "、").split("、")
+                if name.strip()
+            ]
         if not artists:
             artists = ["Unknown"]
 
         album_info = item.get("album", {})
-        album: str = album_info.get("name", "") if isinstance(album_info, dict) else ""
+        album = ""
+        if isinstance(album_info, dict):
+            album = album_info.get("name", "")
+        elif item.get("albumMid"):
+            album = str(item.get("albumMid", ""))
 
         # Duration: QQ returns seconds as int in some responses
         duration_sec = item.get("interval", 0) or item.get("duration", 0)

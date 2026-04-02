@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from datetime import date
 
 from .config import Config
 from .matcher import match_songs
@@ -41,6 +42,7 @@ def run(dry_run: bool = False) -> int:
     report: SyncReport | None = None
     playlist_id = ""
     playlist_url = ""
+    sync_date = date.today().isoformat()
 
     try:
         config = Config.from_env()
@@ -92,6 +94,7 @@ def run(dry_run: bool = False) -> int:
         else:
             logger.info("Step 4/4: Updating Spotify playlist with %d tracks", len(matched_uris))
             spotify.replace_playlist_tracks(playlist_id, matched_uris)
+            spotify.update_playlist_metadata(playlist_id, sync_date)
 
         if result.unmatched:
             logger.info("Unmatched songs:")

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import date
 from dataclasses import dataclass, field
 
 import spotipy
@@ -12,7 +13,6 @@ from .config import Config
 
 logger = logging.getLogger(__name__)
 
-PLAYLIST_MARKER = "[managed-by:qq-music-spotify-sync]"
 _SEARCH_LIMIT = 10       # Spotify Feb 2026 max
 _BASE_PACING = 0.1       # seconds between search calls
 
@@ -28,6 +28,11 @@ class SpotifyTrack:
     artists: list[str]
     duration_ms: int
     popularity: int = 0
+
+
+def _playlist_description(updated_on: str | None = None) -> str:
+    date_text = updated_on or date.today().isoformat()
+    return f"最近更新：{date_text}"
 
 
 def _build_client(config: Config) -> spotipy.Spotify:
@@ -113,8 +118,8 @@ class SpotifyClient:
         """
         Find or create the managed playlist. Priority:
           1. SPOTIFY_PLAYLIST_ID if configured
-          2. Playlist owned by current user whose description contains PLAYLIST_MARKER
-          3. Create new playlist with marker in description
+          2. Playlist owned by current user whose name exactly matches
+          3. Create new playlist
 
         Returns the playlist ID.
         """
@@ -125,7 +130,7 @@ class SpotifyClient:
             logger.info("Using configured playlist ID: %s", config.spotify_playlist_id)
             return config.spotify_playlist_id
 
-        # Priority 2: find by owner + marker
+        # Priority 2: find by owner + exact name
         user_id = self.current_user_id
         playlist_id = self._find_managed_playlist(user_id, config.spotify_playlist_name)
         if playlist_id:
@@ -136,7 +141,7 @@ class SpotifyClient:
         return self._create_managed_playlist(user_id, config.spotify_playlist_name)
 
     def _find_managed_playlist(self, user_id: str, name: str) -> str | None:
-        """Paginate through all user playlists looking for the managed one."""
+        """Paginate through all user playlists looking for an exact-name match."""
         offset = 0
         while True:
             try:
@@ -149,13 +154,8 @@ class SpotifyClient:
                 if pl is None:
                     continue
                 owner_id = (pl.get("owner") or {}).get("id", "")
-                description = pl.get("description", "") or ""
                 pl_name = pl.get("name", "")
-                if (
-                    owner_id == user_id
-                    and PLAYLIST_MARKER in description
-                    and pl_name == name
-                ):
+                if owner_id == user_id and pl_name == name:
                     return pl["id"]
 
             if result.get("next") is None:
@@ -165,12 +165,11 @@ class SpotifyClient:
         return None
 
     def _create_managed_playlist(self, user_id: str, name: str) -> str:
-        description = f"自动同步自 QQ 音乐热歌榜，每日更新。{PLAYLIST_MARKER}"
         try:
             pl = self._sp.current_user_playlist_create(
                 name=name,
                 public=True,
-                description=description,
+                description=_playlist_description(),
             )
         except Exception as exc:
             raise SpotifyError(f"Failed to create playlist: {exc}") from exc
@@ -184,6 +183,17 @@ class SpotifyClient:
             playlist_id,
         )
         return playlist_id
+
+    def update_playlist_metadata(self, playlist_id: str, updated_on: str) -> None:
+        try:
+            self._sp.playlist_change_details(
+                playlist_id,
+                description=_playlist_description(updated_on),
+            )
+        except Exception as exc:
+            raise SpotifyError(f"Failed to update playlist metadata: {exc}") from exc
+
+        logger.info("Updated playlist %s description to %s", playlist_id, updated_on)
 
     def replace_playlist_tracks(self, playlist_id: str, track_uris: list[str]) -> None:
         """Replace all tracks in the playlist. track_uris must have <= 100 entries."""

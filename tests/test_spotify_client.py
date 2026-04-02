@@ -5,10 +5,10 @@ import pytest
 
 from qq_spotify_sync.config import Config
 from qq_spotify_sync.spotify_client import (
-    PLAYLIST_MARKER,
     SpotifyClient,
     SpotifyError,
     SpotifyTrack,
+    _playlist_description,
     _build_client,
 )
 
@@ -84,7 +84,7 @@ class TestEnsurePlaylist:
                     "id": "managed-pl-id",
                     "name": "QQ音乐热歌榜",
                     "owner": {"id": "testuser"},
-                    "description": f"Daily sync {PLAYLIST_MARKER}",
+                    "description": "最近更新：2026-04-02",
                 }
             ],
             "next": None,
@@ -92,7 +92,7 @@ class TestEnsurePlaylist:
         client = _make_client(sp)
         result = client.ensure_playlist()
         assert result == "managed-pl-id"
-        sp.user_playlist_create.assert_not_called()
+        sp.current_user_playlist_create.assert_not_called()
 
     def test_ignores_playlist_owned_by_other_user(self):
         sp = MagicMock()
@@ -102,7 +102,7 @@ class TestEnsurePlaylist:
                     "id": "other-pl-id",
                     "name": "QQ音乐热歌榜",
                     "owner": {"id": "someone_else"},
-                    "description": PLAYLIST_MARKER,
+                    "description": "最近更新：2026-04-02",
                 }
             ],
             "next": None,
@@ -121,7 +121,7 @@ class TestEnsurePlaylist:
         assert result == "brand-new-id"
         sp.current_user_playlist_create.assert_called_once()
         call_kwargs = sp.current_user_playlist_create.call_args
-        assert PLAYLIST_MARKER in call_kwargs.kwargs.get("description", "")
+        assert call_kwargs.kwargs.get("description", "").startswith("最近更新：")
 
     def test_paginates_through_playlists(self):
         sp = MagicMock()
@@ -136,7 +136,7 @@ class TestEnsurePlaylist:
                         "id": "target-pl",
                         "name": "QQ音乐热歌榜",
                         "owner": {"id": "testuser"},
-                        "description": PLAYLIST_MARKER,
+                        "description": "最近更新：2026-04-02",
                     }
                 ],
                 "next": None,
@@ -145,6 +145,15 @@ class TestEnsurePlaylist:
         client = _make_client(sp)
         result = client.ensure_playlist()
         assert result == "target-pl"
+
+    def test_updates_playlist_metadata_with_date(self):
+        sp = MagicMock()
+        client = _make_client(sp)
+        client.update_playlist_metadata("pl-id", "2026-04-02")
+        sp.playlist_change_details.assert_called_once_with(
+            "pl-id",
+            description="最近更新：2026-04-02",
+        )
 
 
 class TestReplacePlaylistTracks:

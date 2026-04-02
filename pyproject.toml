@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Daily sync of QQ Music hot chart to a Spotify playlist."
 requires-python = ">=3.11"
 dependencies = [
+    "opencc-python-reimplemented>=0.1.7,<1",
     "requests>=2.32,<3",
     "spotipy>=2.24,<3",
 ]

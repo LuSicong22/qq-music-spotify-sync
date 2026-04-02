@@ -8,6 +8,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
+from opencc import OpenCC
+
 from .qq_music import QQSong
 from .spotify_client import SpotifyClient, SpotifyTrack
 
@@ -23,12 +25,35 @@ _SPECIAL_VERSION_TAGS = re.compile(
 _BRACKET_CONTENT = re.compile(r"[(\[（【][^)\]）】]*[)\]）】]")
 _FEAT_SUFFIX = re.compile(r"\s+(feat\.?|ft\.?|featuring)\s+.*", re.IGNORECASE)
 _WHITESPACE = re.compile(r"\s+")
+_LATIN_ARTIST_PHRASE = re.compile(r"[a-z0-9][a-z0-9 .&'/-]*[a-z0-9]", re.IGNORECASE)
+_CJK_ARTIST_PHRASE = re.compile(r"[\u4e00-\u9fff]{2,}")
+_PUNCT_TO_SPACE = str.maketrans({
+    ".": " ",
+    "·": " ",
+    "•": " ",
+    "・": " ",
+    "_": " ",
+    "-": " ",
+    "/": " ",
+    "&": " ",
+})
 
 _MAX_DURATION_DIFF_MS = 15_000   # 15 seconds
 _TITLE_SIMILARITY_THRESHOLD = 0.8
+_RELAXED_PRIMARY_TITLE_THRESHOLD = 0.95
 _SEARCH_PACING = 0.1             # seconds between API calls
 _TOTAL_BUDGET_SECONDS = 300      # 5-minute total budget for all searches
 _MAX_RETRIES_PER_SONG = 2
+
+_T2S = OpenCC("t2s")
+
+
+def _contains_cjk(text: str) -> bool:
+    return bool(re.search(r"[\u4e00-\u9fff]", text))
+
+
+def _contains_latin(text: str) -> bool:
+    return bool(re.search(r"[a-z]", text, re.IGNORECASE))
 
 
 @dataclass
@@ -49,10 +74,13 @@ def _normalize(text: str) -> str:
     """Normalize a track/artist name for fuzzy comparison."""
     # Convert full-width characters to ASCII equivalents
     text = unicodedata.normalize("NFKC", text)
+    text = _T2S.convert(text)
     # Remove content inside brackets
     text = _BRACKET_CONTENT.sub("", text)
     # Remove feat. / ft. suffixes
     text = _FEAT_SUFFIX.sub("", text)
+    # Normalize punctuation variants that often differ across providers
+    text = text.translate(_PUNCT_TO_SPACE)
     # Lowercase and collapse whitespace
     text = _WHITESPACE.sub(" ", text.lower()).strip()
     return text
@@ -64,9 +92,47 @@ def _title_similarity(a: str, b: str) -> float:
 
 def _artists_overlap(qq_artists: list[str], sp_artists: list[str]) -> int:
     """Return count of matching artists (case-insensitive, whitespace-collapsed)."""
-    norm_qq = {_normalize(a) for a in qq_artists}
-    norm_sp = {_normalize(a) for a in sp_artists}
+    norm_qq = set().union(*(_artist_aliases(a) for a in qq_artists)) if qq_artists else set()
+    norm_sp = set().union(*(_artist_aliases(a) for a in sp_artists)) if sp_artists else set()
     return len(norm_qq & norm_sp)
+
+
+def _artist_aliases(name: str) -> set[str]:
+    """
+    Expand an artist string into a small alias set.
+
+    Examples:
+      - "Dizzy Dizzo (蔡诗芸)" -> {"dizzy dizzo", "蔡诗芸", ...}
+      - "G.E.M. 邓紫棋" -> {"g e m", "邓紫棋", ...}
+    """
+    aliases: set[str] = set()
+    normalized_full = _normalize(name)
+    if normalized_full:
+        aliases.add(normalized_full)
+
+    full_text = unicodedata.normalize("NFKC", _T2S.convert(name))
+    bracket_chunks = re.findall(r"[(\[（【]([^)\]）】]+)[)\]）】]", full_text)
+    for chunk in bracket_chunks:
+        normalized_chunk = _normalize(chunk)
+        if normalized_chunk:
+            aliases.add(normalized_chunk)
+
+    outside_brackets = _BRACKET_CONTENT.sub(" ", full_text)
+    normalized_outside = _normalize(outside_brackets)
+    if normalized_outside:
+        aliases.add(normalized_outside)
+
+    for match in _LATIN_ARTIST_PHRASE.findall(full_text):
+        normalized_match = _normalize(match)
+        if normalized_match:
+            aliases.add(normalized_match)
+
+    for match in _CJK_ARTIST_PHRASE.findall(full_text):
+        normalized_match = _normalize(match)
+        if normalized_match:
+            aliases.add(normalized_match)
+
+    return aliases
 
 
 def _has_special_version_tag(title: str) -> bool:
@@ -84,7 +150,11 @@ def _duration_score(qq_ms: int, sp_ms: int) -> float:
 
 
 def _score_candidate(
-    song: QQSong, candidate: SpotifyTrack, source_has_special: bool
+    song: QQSong,
+    candidate: SpotifyTrack,
+    source_has_special: bool,
+    *,
+    allow_primary_artist_fallback: bool = False,
 ) -> float | None:
     """
     Return a composite score [0..1] for the candidate, or None if it fails
@@ -97,7 +167,9 @@ def _score_candidate(
 
     # Acceptance: artist overlap
     overlap = _artists_overlap(song.artists, candidate.artists)
-    if overlap == 0:
+    if overlap == 0 and not (
+        allow_primary_artist_fallback and _is_strong_primary_match(song, candidate)
+    ):
         return None
 
     # Acceptance: exclude special versions unless source also has the tag
@@ -114,25 +186,64 @@ def _score_candidate(
         dur_score = 0.5
 
     # Composite score
-    max_overlap = max(len(song.artists), len(candidate.artists), 1)
-    normalized_overlap = min(overlap / max_overlap, 1.0)
-    score = title_sim * 0.4 + normalized_overlap * 0.3 + dur_score * 0.3
+    if overlap == 0:
+        normalized_overlap = 0.35
+        score = title_sim * 0.65 + normalized_overlap * 0.1 + dur_score * 0.25
+    else:
+        max_overlap = max(len(song.artists), len(candidate.artists), 1)
+        normalized_overlap = min(overlap / max_overlap, 1.0)
+        score = title_sim * 0.4 + normalized_overlap * 0.3 + dur_score * 0.3
     return score
 
 
 def _best_candidate(
-    song: QQSong, candidates: list[SpotifyTrack]
+    song: QQSong,
+    candidates: list[SpotifyTrack],
+    *,
+    allow_primary_artist_fallback: bool = False,
 ) -> SpotifyTrack | None:
     source_has_special = _has_special_version_tag(song.title)
     scored = []
     for c in candidates:
-        s = _score_candidate(song, c, source_has_special)
+        s = _score_candidate(
+            song,
+            c,
+            source_has_special,
+            allow_primary_artist_fallback=allow_primary_artist_fallback,
+        )
         if s is not None:
             scored.append((s, c))
     if not scored:
         return None
     scored.sort(key=lambda x: x[0], reverse=True)
     return scored[0][1]
+
+
+def _is_strong_primary_match(song: QQSong, candidate: SpotifyTrack) -> bool:
+    """
+    Allow a cautious fallback when Spotify's top result clearly matches the title,
+    but artist names differ because one side uses English stage names / aliases.
+    Only used for the primary query that already contains artist text.
+    """
+    title_sim = _title_similarity(song.title, candidate.name)
+    if title_sim < _RELAXED_PRIMARY_TITLE_THRESHOLD:
+        return False
+
+    # Only use this fallback for cross-script artist names such as:
+    #   周杰伦 -> Jay Chou, 李荣浩 -> Ronghao Li
+    source_has_cjk = any(_contains_cjk(artist) for artist in song.artists)
+    candidate_has_latin = any(_contains_latin(artist) for artist in candidate.artists)
+    candidate_has_cjk = any(_contains_cjk(artist) for artist in candidate.artists)
+    if not source_has_cjk or not candidate_has_latin or candidate_has_cjk:
+        return False
+
+    if _has_special_version_tag(candidate.name) and not _has_special_version_tag(song.title):
+        return False
+
+    if song.duration_ms > 0 and abs(song.duration_ms - candidate.duration_ms) > _MAX_DURATION_DIFF_MS:
+        return False
+
+    return True
 
 
 def _candidates_for_log(candidates: list[SpotifyTrack]) -> list[dict]:
@@ -207,7 +318,11 @@ def _search_with_retry(
                     candidates = []
 
         all_candidates.extend(candidates)
-        best = _best_candidate(song, candidates)
+        best = _best_candidate(
+            song,
+            candidates,
+            allow_primary_artist_fallback=(query == primary_query),
+        )
         if best:
             logger.debug("Matched '%s' via query '%s' -> '%s'", song.title, query, best.name)
             return best, None  # type: ignore[return-value]

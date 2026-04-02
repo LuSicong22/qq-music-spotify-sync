@@ -5,8 +5,10 @@ from unittest.mock import MagicMock
 from qq_spotify_sync.matcher import (
     MatchResult,
     _artists_overlap,
+    _artist_aliases,
     _best_candidate,
     _has_special_version_tag,
+    _is_strong_primary_match,
     _normalize,
     _score_candidate,
     _title_similarity,
@@ -47,6 +49,21 @@ class TestNormalize:
         result = _normalize("ａｂｃ")  # full-width letters
         assert result == "abc"
 
+    def test_converts_traditional_to_simplified(self):
+        assert _normalize("戀人") == "恋人"
+
+
+class TestArtistAliases:
+    def test_extracts_cjk_alias_from_parentheses(self):
+        aliases = _artist_aliases("Dizzy Dizzo (蔡诗芸)")
+        assert "蔡诗芸" in aliases
+        assert "dizzy dizzo" in aliases
+
+    def test_extracts_mixed_script_aliases(self):
+        aliases = _artist_aliases("G.E.M. 邓紫棋")
+        assert "g e m" in aliases
+        assert "邓紫棋" in aliases
+
 
 class TestArtistsOverlap:
     def test_exact_match(self):
@@ -60,6 +77,9 @@ class TestArtistsOverlap:
 
     def test_partial_overlap(self):
         assert _artists_overlap(["A", "B", "C"], ["B", "D"]) == 1
+
+    def test_matches_alias_in_parentheses(self):
+        assert _artists_overlap(["Dizzy Dizzo (蔡诗芸)"], ["蔡詩蕓"]) == 1
 
 
 class TestHasSpecialVersionTag:
@@ -95,6 +115,17 @@ class TestScoreCandidate:
         track = make_track(artists=["邓紫棋"])
         score = _score_candidate(song, track, source_has_special=False)
         assert score is None
+
+    def test_allows_strong_primary_match_without_artist_overlap(self):
+        song = make_song(title="恋人", artists=["李荣浩"], duration_ms=276_000)
+        track = make_track(name="戀人", artists=["Ronghao Li"], duration_ms=275_912)
+        score = _score_candidate(
+            song,
+            track,
+            source_has_special=False,
+            allow_primary_artist_fallback=True,
+        )
+        assert score is not None
 
     def test_rejects_live_version_when_source_is_not_live(self):
         song = make_song(title="漠河舞厅")
@@ -141,6 +172,25 @@ class TestBestCandidate:
     def test_returns_none_for_empty_candidates(self):
         song = make_song()
         assert _best_candidate(song, []) is None
+
+    def test_accepts_primary_query_alias_match(self):
+        song = make_song(title="那天下雨了", artists=["周杰伦"], duration_ms=223_000)
+        candidate = make_track(name="那天下雨了", artists=["Jay Chou"], duration_ms=223_333, uri="uri:jay")
+        result = _best_candidate(song, [candidate], allow_primary_artist_fallback=True)
+        assert result is not None
+        assert result.uri == "uri:jay"
+
+
+class TestStrongPrimaryMatch:
+    def test_requires_near_exact_title(self):
+        song = make_song(title="恋人", artists=["李荣浩"], duration_ms=276_000)
+        track = make_track(name="恋人未满", artists=["Ronghao Li"], duration_ms=275_000)
+        assert not _is_strong_primary_match(song, track)
+
+    def test_rejects_same_script_wrong_artist_fallback(self):
+        song = make_song(title="爱情讯息", artists=["郭静"], duration_ms=250_000)
+        track = make_track(name="爱情讯息", artists=["浠然"], duration_ms=250_000)
+        assert not _is_strong_primary_match(song, track)
 
 
 class TestMatchSongs:

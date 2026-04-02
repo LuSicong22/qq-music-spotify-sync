@@ -21,7 +21,7 @@ def main() -> None:
 
     client_id = os.getenv("SPOTIPY_CLIENT_ID") or input("Spotify Client ID: ").strip()
     client_secret = os.getenv("SPOTIPY_CLIENT_SECRET") or input("Spotify Client Secret: ").strip()
-    redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "http://localhost:8888/callback")
+    redirect_uri = os.getenv("SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback")
 
     print(f"\nRedirect URI: {redirect_uri}")
     print("Make sure this URI is registered in your Spotify Developer App settings.\n")
@@ -44,7 +44,7 @@ def main() -> None:
 
     code = input(
         "After authorizing, paste the full redirect URL here\n"
-        "(e.g. http://localhost:8888/callback?code=...): "
+        "(e.g. http://127.0.0.1:8888/callback?code=...): "
     ).strip()
 
     # Extract the code from the URL if the user pasted the full URL

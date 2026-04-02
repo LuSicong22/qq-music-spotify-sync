@@ -1,0 +1,176 @@
+"""Tests for the matcher module: normalization, scoring, and matching logic."""
+import pytest
+from unittest.mock import MagicMock
+
+from qq_spotify_sync.matcher import (
+    MatchResult,
+    _artists_overlap,
+    _best_candidate,
+    _has_special_version_tag,
+    _normalize,
+    _score_candidate,
+    _title_similarity,
+    match_songs,
+)
+from qq_spotify_sync.qq_music import QQSong
+from qq_spotify_sync.spotify_client import SpotifyTrack
+
+
+def make_song(title="漠河舞厅", artists=None, duration_ms=270_000) -> QQSong:
+    return QQSong(title=title, artists=artists or ["柳爽"], album="", duration_ms=duration_ms)
+
+
+def make_track(name="漠河舞厅", artists=None, duration_ms=270_000, uri="spotify:track:abc") -> SpotifyTrack:
+    return SpotifyTrack(uri=uri, name=name, artists=artists or ["柳爽"], duration_ms=duration_ms)
+
+
+class TestNormalize:
+    def test_strips_parentheses(self):
+        assert _normalize("漠河舞厅 (Live)") == "漠河舞厅"
+
+    def test_strips_chinese_brackets(self):
+        assert _normalize("漠河舞厅（现场版）") == "漠河舞厅"
+
+    def test_strips_feat(self):
+        assert _normalize("Song Title feat. Another Artist") == "song title"
+
+    def test_strips_ft(self):
+        assert _normalize("Song ft. Someone") == "song"
+
+    def test_lowercases(self):
+        assert _normalize("Hello World") == "hello world"
+
+    def test_collapses_whitespace(self):
+        assert _normalize("hello   world") == "hello world"
+
+    def test_full_width_to_ascii(self):
+        result = _normalize("ａｂｃ")  # full-width letters
+        assert result == "abc"
+
+
+class TestArtistsOverlap:
+    def test_exact_match(self):
+        assert _artists_overlap(["柳爽"], ["柳爽"]) == 1
+
+    def test_case_insensitive(self):
+        assert _artists_overlap(["Artist A"], ["artist a"]) == 1
+
+    def test_no_overlap(self):
+        assert _artists_overlap(["Artist A"], ["Artist B"]) == 0
+
+    def test_partial_overlap(self):
+        assert _artists_overlap(["A", "B", "C"], ["B", "D"]) == 1
+
+
+class TestHasSpecialVersionTag:
+    def test_live(self):
+        assert _has_special_version_tag("Song (Live)")
+
+    def test_remastered(self):
+        assert _has_special_version_tag("Song - Remastered 2021")
+
+    def test_remix(self):
+        assert _has_special_version_tag("Song (Remix)")
+
+    def test_normal_title(self):
+        assert not _has_special_version_tag("漠河舞厅")
+
+
+class TestScoreCandidate:
+    def test_perfect_match_scores_high(self):
+        song = make_song()
+        track = make_track()
+        score = _score_candidate(song, track, source_has_special=False)
+        assert score is not None
+        assert score >= 0.9
+
+    def test_rejects_low_title_similarity(self):
+        song = make_song(title="完全不同的歌")
+        track = make_track(name="Another Song Entirely")
+        score = _score_candidate(song, track, source_has_special=False)
+        assert score is None
+
+    def test_rejects_no_artist_overlap(self):
+        song = make_song(artists=["柳爽"])
+        track = make_track(artists=["邓紫棋"])
+        score = _score_candidate(song, track, source_has_special=False)
+        assert score is None
+
+    def test_rejects_live_version_when_source_is_not_live(self):
+        song = make_song(title="漠河舞厅")
+        track = make_track(name="漠河舞厅 (Live)")
+        score = _score_candidate(song, track, source_has_special=False)
+        assert score is None
+
+    def test_allows_live_version_when_source_is_live(self):
+        song = make_song(title="漠河舞厅 (Live)")
+        track = make_track(name="漠河舞厅 (Live)")
+        score = _score_candidate(song, track, source_has_special=True)
+        assert score is not None
+
+    def test_rejects_duration_too_different(self):
+        song = make_song(duration_ms=270_000)
+        track = make_track(duration_ms=270_000 + 20_000)  # 20s difference
+        score = _score_candidate(song, track, source_has_special=False)
+        assert score is None
+
+    def test_neutral_score_when_duration_unknown(self):
+        song = make_song(duration_ms=0)  # Unknown
+        track = make_track(duration_ms=999_000)
+        # Should not be rejected due to duration, but may fail on other criteria
+        song2 = make_song(duration_ms=0, title="漠河舞厅", artists=["柳爽"])
+        track2 = make_track(duration_ms=999_000)
+        score = _score_candidate(song2, track2, source_has_special=False)
+        assert score is not None  # Not rejected by duration
+
+
+class TestBestCandidate:
+    def test_picks_best_scoring_candidate(self):
+        song = make_song()
+        worse = make_track(name="漠河舞厅 (Remix)", uri="uri:worse")
+        better = make_track(name="漠河舞厅", uri="uri:better")
+        result = _best_candidate(song, [worse, better])
+        assert result is not None
+        assert result.uri == "uri:better"
+
+    def test_returns_none_when_no_candidates_pass(self):
+        song = make_song()
+        bad = make_track(name="Completely Different Song", artists=["Nobody"])
+        assert _best_candidate(song, [bad]) is None
+
+    def test_returns_none_for_empty_candidates(self):
+        song = make_song()
+        assert _best_candidate(song, []) is None
+
+
+class TestMatchSongs:
+    def _make_spotify(self, search_returns: list[SpotifyTrack]):
+        sp = MagicMock()
+        sp.search_tracks.return_value = search_returns
+        return sp
+
+    def test_matches_song(self):
+        song = make_song()
+        track = make_track()
+        sp = self._make_spotify([track])
+        result = match_songs([song], sp)
+        assert len(result.matched) == 1
+        assert result.matched[0][0] is song
+
+    def test_records_unmatched(self):
+        song = make_song()
+        sp = self._make_spotify([])
+        result = match_songs([song], sp)
+        assert len(result.unmatched) == 1
+        assert result.unmatched[0][0] is song
+        assert result.unmatched[0][1].reason == "no_search_results"
+
+    def test_unmatched_reason_with_candidates(self):
+        song = make_song()
+        bad_track = make_track(name="Completely Different", artists=["Nobody"])
+        sp = self._make_spotify([bad_track])
+        result = match_songs([song], sp)
+        assert len(result.unmatched) == 1
+        assert result.unmatched[0][1].reason == "no_candidate_passed_acceptance_criteria"
+        # Both phases return candidates (same bad track), so we get >= 1
+        assert len(result.unmatched[0][1].candidates) >= 1

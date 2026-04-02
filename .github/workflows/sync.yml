@@ -1,0 +1,55 @@
+name: Sync QQ Music Hot Chart to Spotify
+
+on:
+  schedule:
+    # UTC 16:13 = Beijing 00:13 (after QQ Music chart usually updates)
+    # Offset from :00 to avoid GitHub Actions scheduler congestion
+    - cron: '13 16 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: qq-spotify-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest tests/ -v
+
+      - name: Run sync
+        env:
+          SPOTIPY_CLIENT_ID: ${{ secrets.SPOTIPY_CLIENT_ID }}
+          SPOTIPY_CLIENT_SECRET: ${{ secrets.SPOTIPY_CLIENT_SECRET }}
+          SPOTIFY_REFRESH_TOKEN: ${{ secrets.SPOTIFY_REFRESH_TOKEN }}
+          SPOTIFY_PLAYLIST_ID: ${{ vars.SPOTIFY_PLAYLIST_ID }}
+          SPOTIFY_PLAYLIST_NAME: ${{ vars.SPOTIFY_PLAYLIST_NAME || 'QQ音乐热歌榜' }}
+          QQ_MUSIC_TOP_ID: ${{ vars.QQ_MUSIC_TOP_ID || '26' }}
+          QQ_MUSIC_NUM: ${{ vars.QQ_MUSIC_NUM || '100' }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python -m qq_spotify_sync.main
+
+      - name: Upload unmatched songs artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-report-${{ github.run_id }}
+          path: |
+            unmatched-*.json
+            result-error-*.json
+          if-no-files-found: ignore
+          retention-days: 30

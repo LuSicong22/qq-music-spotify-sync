@@ -1,0 +1,13 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.eggs/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+unmatched-*.json
+result-*.json

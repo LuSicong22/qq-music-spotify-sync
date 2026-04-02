@@ -1,0 +1,19 @@
+{
+  "detail": {
+    "data": {
+      "topInfo": {
+        "topId": 26,
+        "listName": "新歌榜",
+        "period": "2026-04-02"
+      },
+      "songInfoList": [
+        {
+          "title": "Some New Song",
+          "singer": [{"name": "Artist"}],
+          "album": {"name": "Album"},
+          "interval": 200
+        }
+      ]
+    }
+  }
+}

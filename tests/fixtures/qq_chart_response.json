@@ -1,0 +1,43 @@
+{
+  "detail": {
+    "data": {
+      "topInfo": {
+        "topId": 26,
+        "listName": "热歌榜",
+        "period": "2026-04-02"
+      },
+      "songInfoList": [
+        {
+          "title": "漠河舞厅",
+          "singer": [{"name": "柳爽"}],
+          "album": {"name": "漠河舞厅"},
+          "interval": 270
+        },
+        {
+          "title": "错位时空",
+          "singer": [{"name": "艾辰"}],
+          "album": {"name": "错位时空"},
+          "interval": 245
+        },
+        {
+          "title": "清空",
+          "singer": [{"name": "贺一航"}],
+          "album": {"name": "清空"},
+          "interval": 218
+        },
+        {
+          "title": "半壶纱",
+          "singer": [{"name": "刘珂矣"}],
+          "album": {"name": "半壶纱"},
+          "interval": 283
+        },
+        {
+          "title": "光年之外",
+          "singer": [{"name": "G.E.M.邓紫棋"}],
+          "album": {"name": "光年之外"},
+          "interval": 231
+        }
+      ]
+    }
+  }
+}

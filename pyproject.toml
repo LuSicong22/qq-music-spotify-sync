@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qq-spotify-sync"
+version = "0.1.0"
+description = "Daily sync of QQ Music hot chart to a Spotify playlist."
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.32,<3",
+    "spotipy>=2.24,<3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8",
+    "pytest-mock>=3",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
